@@ -1,10 +1,15 @@
-﻿using job.Configurations;
+﻿using Azure.Core;
+using Google.Apis.Auth;
+using job.Configurations;
 using job.Dtos;
 using job.Models;
+using job.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using System.IdentityModel.Tokens.Jwt;
+using static Google.Apis.Auth.GoogleJsonWebSignature;
 
 namespace job.Controllers
 {
@@ -15,12 +20,16 @@ namespace job.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly RoleSettings _roleSettings;
+        private readonly ITokenService _tokenService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IOptions<RoleSettings> options)
+        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IOptions<RoleSettings> options, ITokenService tokenService, IConfiguration configuration)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _roleSettings = options.Value;
+            _tokenService = tokenService;
+            _configuration = configuration;
         }
 
         [HttpPost("Login")]
@@ -48,7 +57,7 @@ namespace job.Controllers
                 {
                     return Ok(ApiResponse<object>.SuccessResponse(new
                     {
-                        Token = "abc",
+                        Token = _tokenService.CreateJwt(user, dto.Role),
                         User = new { user.Email, user.UserName },
                     }, "Login successfully"));
                 }
@@ -101,6 +110,72 @@ namespace job.Controllers
                 }
             }
             return BadRequest(ApiResponse<object>.FailureResponse(result.Errors.FirstOrDefault().Description));
+        }
+
+        [HttpPost("Login-Google")]
+        public async Task<IActionResult> GoogleLoginAsync([FromBody] GoogleLoginRequestDto dto)
+        {
+            Payload payload;
+            try
+            {
+                payload = await ValidateAsync(dto.IdToken, new ValidationSettings
+                {
+                    Audience = [_configuration["OAuth:Google:ClientId"]]
+                });
+            }
+            catch (InvalidJwtException)
+            {
+                return BadRequest(ApiResponse<object>.FailureResponse("Google Token is invalid or expired."));
+            }
+            catch (Exception)
+            {
+                return BadRequest(ApiResponse<object>.FailureResponse("System error."));
+            }
+
+            var email = payload.Email;
+            var user = await _userManager.FindByEmailAsync(email);
+
+            if (user is null)
+            {
+                user = new ApplicationUser
+                {
+                    Email = email,
+                    UserName = email.Substring(0, email.IndexOf("@")),
+                    FullName = payload.Name,
+                    EmailConfirmed = true
+                };
+
+                var result = await _userManager.CreateAsync(user);
+                if (!result.Succeeded)
+                    return BadRequest(ApiResponse<object>.FailureResponse("User creation failed."));
+
+                await _userManager.AddToRoleAsync(user, dto.Role);
+
+                return Ok(ApiResponse<object>.SuccessResponse(new
+                {
+                    Token = _tokenService.CreateJwt(user, dto.Role),
+                    User = new { user.Email, user.UserName, dto.Role }
+                }, "Login successfully"));
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+
+            var checkRoleResult = roles.Any(r => string.Equals(r, dto.Role, StringComparison.OrdinalIgnoreCase));
+
+            if (!checkRoleResult)
+            {
+                return StatusCode(403, ApiResponse<object>.FailureResponse("Your account does not have access to this section."));
+            }
+
+            return Ok(ApiResponse<object>.SuccessResponse(new
+            {
+                Token = _tokenService.CreateJwt(user, dto.Role),
+                User = new
+                {
+                    user.Email,
+                    user.UserName
+                }
+            }, "Login successfully"));
         }
     }
 

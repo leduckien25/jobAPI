@@ -1,9 +1,14 @@
 ﻿using job.Dtos;
 using job.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace job.Controllers
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class JobsController : ControllerBase
@@ -29,7 +34,7 @@ namespace job.Controllers
         }
 
         [HttpGet("{id:int}")]
-        public async Task<IActionResult> GetJobAsync([FromRoute] int id)
+        public async Task<IActionResult> GetJob([FromRoute] int id)
         {
             var job = await _jobService.GetJobCardAsync(id);
 
@@ -42,10 +47,26 @@ namespace job.Controllers
         }
 
         [HttpGet("Featured")]
-        public async Task<IActionResult> GetFeaturedJobsAsync([FromQuery] int count = 6)
+        public async Task<IActionResult> GetFeaturedJobs([FromQuery] int count = 6)
         {
             var featuredJobs = await _jobService.GetFeaturedJobsAsync(count);
             return Ok(ApiResponse<List<JobCardDto>>.SuccessResponse(featuredJobs));
+        }
+
+        [Authorize(Roles = "candidate")]
+        [HttpGet("my-applications")]
+        public async Task<IActionResult> GetSubmittedJobs()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            var applications = await _jobService.GetApplications(userId);
+
+            if (applications == null || !applications.Any())
+            {
+                return Ok(ApiResponse<List<ApplicationCardDto>>.SuccessResponse(new List<ApplicationCardDto>(), "You haven't applied for any jobs yet."));
+            }
+
+            return Ok(ApiResponse<List<ApplicationCardDto>>.SuccessResponse(applications));
         }
     }
 }

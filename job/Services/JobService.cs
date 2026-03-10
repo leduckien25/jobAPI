@@ -2,6 +2,7 @@
 using job.Dtos;
 using job.Models;
 using Microsoft.EntityFrameworkCore;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace job.Services
 {
@@ -130,6 +131,30 @@ namespace job.Services
                     ExpiredAt = j.ExpiredAt
                 })
                 .ToListAsync();
+        }
+
+        public async Task<List<ApplicationCardDto>> GetApplications(string userId)
+        {
+            return await _context.Applications
+                .Include(a => a.Job).ThenInclude(j => j.Company)
+                .Where(a => a.UserId == userId)
+                .Select(a => new ApplicationCardDto
+                {
+                    JobCardDto = new JobCardDto
+                    {
+                        Id = a.JobId,
+                        Title = a.Job.Title,
+                        CompanyName = a.Job.Company.Name,
+                        CompanyLogoUrl = a.Job.Company.LogoUrl,
+                        Location = a.Job.Location,
+                        SalaryMin = a.Job.SalaryMin,
+                        SalaryMax = a.Job.SalaryMax,
+                        JobType = a.Job.JobType,
+                        IsNegotiable = a.Job.IsNegotiable
+                    },
+                    Status = a.Status,
+                    AppliedAt = a.AppliedAt
+                }).ToListAsync();
         }
     }
 }

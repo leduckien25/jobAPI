@@ -8,7 +8,6 @@ namespace job.Dtos
         public string Email { get; set; }
         [DataType(DataType.Password)]
         public string Password { get; set; }
-        public bool IsPersistent { get; set; }
         public string Role { get; set; }
     }
 }
